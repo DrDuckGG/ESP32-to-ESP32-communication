@@ -1,0 +1,65 @@
+//The LED code is not necessary, it can also be used to test the range of the radio communication
+
+#include <esp_now.h>
+#include <WiFi.h>
+
+#define LED_PIN 16
+#define MAX_LOG_LINES 10
+
+String lastMessage = "";
+String logEntries[MAX_LOG_LINES];
+int logIndex = 0;
+
+void flashLED() {
+  digitalWrite(LED_PIN, HIGH);
+  delay(50);
+  digitalWrite(LED_PIN, LOW);
+}
+
+void onReceive(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  String incoming = String((char *)data);
+
+  // LED flash
+  flashLED();
+
+  // Save the message
+  lastMessage = incoming;
+  logEntries[logIndex % MAX_LOG_LINES] = incoming;
+  logIndex++;
+
+  // Display log and message
+  Serial.println("Received: " + incoming);
+  Serial.println("Stored last message:");
+  Serial.println(lastMessage);
+
+  Serial.println("Full log (last 10 messages):");
+  int start = (logIndex > MAX_LOG_LINES) ? logIndex - MAX_LOG_LINES : 0;
+  for (int i = start; i < logIndex; i++) {
+    Serial.print("#");
+    Serial.print((i % MAX_LOG_LINES) + 1);
+    Serial.print(": ");
+    Serial.println(logEntries[i % MAX_LOG_LINES]);
+  }
+
+  Serial.println("------------------------");
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  esp_now_register_recv_cb(onReceive);
+  Serial.println("Receiver ready!");
+}
+
+void loop() {
+  // Nothing here — everything is handled by interrupts
+}
