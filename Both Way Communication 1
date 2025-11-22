@@ -1,0 +1,110 @@
+
+#include <esp_now.h>
+#include <WiFi.h>
+
+#define LED_PORT 4          // LED indicator pin
+#define BUTTON_PIN 16       // Button input pin
+#define LED_TIME 300        // LED blink duration (ms)
+
+uint8_t BASE_MAC[] = {0xXX, 0xXX, 0xXX, 0xXX, 0xXX, 0xXX};
+
+// Packet structure (shared with BASE)
+typedef struct {
+  char data[200];
+} esp_packet;
+
+esp_packet incomingPacket;
+
+// Example sensor values
+int heartRate = 82;
+float accelX = 0.13;
+float forceKg = 12.8;
+
+bool lastButtonState = HIGH;
+bool buttonPressed = false;
+
+// ---------------------- RECEIVE CALLBACK ----------------------
+void OnDataRecv(const esp_now_recv_info_t *recv_info,
+                const uint8_t *incomingData,
+                int len) {
+
+  // Blink LED on reception
+  digitalWrite(LED_PORT, HIGH);
+
+  if (len <= sizeof(esp_packet)) {
+    memcpy(&incomingPacket, incomingData, len);
+    incomingPacket.data[199] = '\0';
+  }
+
+  Serial.print("Received from BASE: ");
+  Serial.println(incomingPacket.data);
+
+  delay(LED_TIME);
+  digitalWrite(LED_PORT, LOW);
+}
+
+// ---------------------- SETUP ----------------------
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LED_PORT, OUTPUT);
+  digitalWrite(LED_PORT, LOW);
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);  // button with pullup
+
+  WiFi.mode(WIFI_STA);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed!");
+    return;
+  }
+
+  esp_now_register_recv_cb(OnDataRecv);
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, BASE_MAC, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add BASE peer!");
+  }
+}
+
+// ---------------------- LOOP ----------------------
+void loop() {
+  // Read button
+  bool currentButtonState = digitalRead(BUTTON_PIN);
+
+  // Detect falling edge (pressed)
+  if (lastButtonState == HIGH && currentButtonState == LOW) {
+    buttonPressed = true;
+  } else {
+    buttonPressed = false;
+  }
+  lastButtonState = currentButtonState;
+
+  // Send CSV only on button press
+  if (buttonPressed) {
+    String sensorCSV =
+        String(heartRate) + "," +
+        String(accelX, 3) + "," +
+        String(forceKg, 2);
+
+    esp_packet packet;
+    strncpy(packet.data, sensorCSV.c_str(), sizeof(packet.data) - 1);
+    packet.data[sizeof(packet.data) - 1] = '\0';
+
+    esp_now_send(BASE_MAC, (uint8_t *)&packet, sizeof(packet));
+
+    Serial.print("Sent to BASE: ");
+    Serial.println(packet.data);
+
+    // Optional: LED blink to indicate send
+    digitalWrite(LED_PORT, HIGH);
+    delay(LED_TIME);
+    digitalWrite(LED_PORT, LOW);
+  }
+
+  delay(10);  // small debounce delay
+}
